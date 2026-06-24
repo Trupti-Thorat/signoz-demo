@@ -1,0 +1,84 @@
+package com.signoz.demo.service;
+
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.mail.SimpleMailMessage;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.stereotype.Service;
+
+import com.signoz.demo.model.EmailRepository;
+import com.signoz.demo.model.EmailRequest;
+
+import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.StatusCode;
+import io.opentelemetry.api.trace.Tracer;
+import io.opentelemetry.context.Scope;
+
+@Service
+public class EmailService {
+
+    private static final Logger log = LoggerFactory.getLogger(EmailService.class);
+
+    @Autowired
+    private JavaMailSender mailSender;
+
+    @Autowired
+    private EmailRepository emailRepository;
+
+    public String sendEmail(String toEmail, String subject, String body) {
+        // Get OpenTelemetry Tracer
+        Tracer tracer = GlobalOpenTelemetry.getTracer("signoz-demo-email-service");
+
+        // Start a custom span for the email operation
+        Span span = tracer.spanBuilder("sendEmail")
+                .setAttribute("email.to", toEmail)
+                .setAttribute("email.subject", subject)
+                .startSpan();
+
+        String traceId = span.getSpanContext().getTraceId();
+        log.info("Starting email send. TraceId={}, To={}, Subject={}", traceId, toEmail, subject);
+
+        try (Scope scope = span.makeCurrent()) {
+            // Add span attributes for observability
+            span.setAttribute("email.body.length", body.length());
+
+            // Send email via SMTP
+            SimpleMailMessage message = new SimpleMailMessage();
+            message.setTo(toEmail);
+            message.setSubject(subject);
+            message.setText(body);
+            mailSender.send(message);
+
+            // Mark success
+            span.setStatus(StatusCode.OK);
+            log.info("Email sent successfully. TraceId={}", traceId);
+
+            // Persist the email log to MySQL
+            EmailRequest record = new EmailRequest(toEmail, subject, body);
+            record.setStatus("SENT");
+            record.setTraceId(traceId);
+            emailRepository.save(record);
+
+            return "Email sent successfully! TraceId: " + traceId;
+
+        } catch (Exception e) {
+            span.setStatus(StatusCode.ERROR, e.getMessage());
+            span.recordException(e);
+            log.error("Failed to send email. TraceId={}, Error={}", traceId, e.getMessage(), e);
+
+            // Log failed attempt to DB
+            EmailRequest record = new EmailRequest(toEmail, subject, body);
+            record.setStatus("FAILED");
+            record.setTraceId(traceId);
+            emailRepository.save(record);
+
+            throw new RuntimeException("Failed to send email: " + e.getMessage(), e);
+
+        } finally {
+            span.end();
+        }
+    }
+}

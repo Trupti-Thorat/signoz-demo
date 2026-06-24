@@ -1,0 +1,70 @@
+package com.example.payment;
+
+import java.util.Map;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import ch.qos.logback.core.joran.action.ActionUtil.Scope;
+import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.StatusCode;
+import io.opentelemetry.api.trace.Tracer;
+
+@RestController
+@RequestMapping("/payment")
+public class PaymentController {
+
+    private static final Logger log = LoggerFactory.getLogger(PaymentController.class);
+
+    @GetMapping("/hello")
+    public String hello() {
+        return "Hello from Payment Service!";
+    }
+
+    /**
+     * Process a payment - traced with OpenTelemetry.
+     * 
+     * curl -X POST http://localhost:8083/payment/process \
+     *   -H "Content-Type: application/json" \
+     *   -d '{"orderId":"ORD-123","amount":999.99,"method":"CREDIT_CARD"}'
+     */
+    @PostMapping("/process")
+    public ResponseEntity<Map<String, String>> processPayment(@RequestBody Map<String, Object> paymentDetails) {
+        Tracer tracer = GlobalOpenTelemetry.getTracer("payment-service");
+        Span span = tracer.spanBuilder("processPayment")
+                .setAttribute("payment.orderId", String.valueOf(paymentDetails.getOrDefault("orderId", "unknown")))
+                .setAttribute("payment.method", String.valueOf(paymentDetails.getOrDefault("method", "unknown")))
+                .setAttribute("payment.amount", String.valueOf(paymentDetails.getOrDefault("amount", 0)))
+                .startSpan();
+
+        String traceId = span.getSpanContext().getTraceId();
+        log.info("Processing payment. TraceId={}, Details={}", traceId, paymentDetails);
+
+        try (Scope scope = span.makeCurrent()) {
+            Thread.sleep(80); // Simulate payment gateway delay
+
+            span.setStatus(StatusCode.OK);
+            log.info("Payment processed successfully. TraceId={}", traceId);
+
+            return ResponseEntity.ok(Map.of(
+                    "status", "PAYMENT_SUCCESS",
+                    "traceId", traceId,
+                    "transactionId", "TXN-" + System.currentTimeMillis()
+            ));
+        } catch (Exception e) {
+            span.setStatus(StatusCode.ERROR, e.getMessage());
+            span.recordException(e);
+            log.error("Payment failed. TraceId={}", traceId, e);
+            return ResponseEntity.internalServerError().body(Map.of("status", "FAILED", "error", e.getMessage()));
+        } finally {
+            span.end();
+        }
+    }
+}

@@ -1,0 +1,106 @@
+version: "3.8"
+
+services:
+
+  # ── MySQL ──────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: signoz-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: signoz
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - signoz-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── SigNoz (all-in-one image) ──────────────────────
+  signoz:
+    image: signoz/signoz:latest
+    container_name: signoz
+    ports:
+      - "3301:3301"   # SigNoz UI
+      - "4317:4317"   # OTel gRPC
+      - "4318:4318"   # OTel HTTP  <-- your services send here
+    networks:
+      - signoz-network
+    volumes:
+      - signoz_data:/var/lib/signoz
+
+  # ── OTel Collector (built into SigNoz image) ───────
+  # Alias so your services can reach SigNoz at 'otel-collector'
+  otel-collector:
+    image: signoz/signoz:latest
+    container_name: otel-collector
+    ports:
+      - "4319:4318"
+    networks:
+      - signoz-network
+    depends_on:
+      - signoz
+
+  # ── SignozDemo (your main service) ─────────────────
+  signoz-demo:
+    build:
+      context: ./SignozDemo
+      dockerfile: Dockerfile
+    container_name: signoz-demo
+    ports:
+      - "8081:8081"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      signoz:
+        condition: service_started
+    networks:
+      - signoz-network
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/signoz?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      - SPRING_DATASOURCE_USERNAME=root
+      - SPRING_DATASOURCE_PASSWORD=root
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://signoz:4318
+
+  # ── OrderService ───────────────────────────────────
+  order-service:
+    build:
+      context: ./OrderService
+      dockerfile: Dockerfile
+    container_name: order-service
+    ports:
+      - "8082:8082"
+    depends_on:
+      - signoz
+    networks:
+      - signoz-network
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://signoz:4318
+
+  # ── PaymentService ─────────────────────────────────
+  payment-service:
+    build:
+      context: ./PaymentService
+      dockerfile: Dockerfile
+    container_name: payment-service
+    ports:
+      - "8083:8083"
+    depends_on:
+      - signoz
+    networks:
+      - signoz-network
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://signoz:4318
+
+networks:
+  signoz-network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  signoz_data:
