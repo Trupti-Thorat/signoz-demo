@@ -1,0 +1,25 @@
+# Eclipse workspace metadata - never commit these
+.metadata/
+.sonarlint/
+
+# Maven build output
+*/target/
+target/
+
+# Java compiled files
+*.class
+*.jar
+
+# Eclipse project files
+.classpath
+.project
+.settings/
+.factorypath
+
+# IDE files
+.idea/
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db

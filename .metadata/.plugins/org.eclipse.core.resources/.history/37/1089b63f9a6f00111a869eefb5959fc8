@@ -1,5 +1,0 @@
-package com.signoz.demo.model;
-
-public class EmailRequest {
-
-}
