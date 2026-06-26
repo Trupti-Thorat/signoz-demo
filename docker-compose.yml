@@ -33,7 +33,7 @@ services:
       - signoz_data:/var/lib/signoz
 
   signoz-demo:
-    image: truptithorat/signoz-demo:%BUILD_NUMBER%
+    image: truptithorat/signoz-demo:latest
     container_name: signoz-demo
     restart: unless-stopped
     ports:
@@ -52,7 +52,7 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://signoz:4318
 
   order-service:
-    image: truptithorat/order-service:%BUILD_NUMBER%
+    image: truptithorat/order-service:latest
     container_name: order-service
     restart: unless-stopped
     ports:
@@ -66,7 +66,7 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://signoz:4318
 
   payment-service:
-    image: truptithorat/payment-service:%BUILD_NUMBER%
+    image: truptithorat/payment-service:latest
     container_name: payment-service
     restart: unless-stopped
     ports:
