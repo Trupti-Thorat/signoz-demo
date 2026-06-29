@@ -19,23 +19,39 @@ public class AlertEmailService {
     @Value("${spring.mail.username}")
     private String fromEmail;
 
-    @SuppressWarnings("unchecked")
-    public void processAndSendAlert(Map<String, Object> payload) {
-        String alertName = getStr(payload, "alertname", "Unknown Alert");
-        String severity  = getStr(payload, "severity",  "critical");
-        String state     = getStr(payload, "state",     "firing");
-        String message   = getStr(payload, "message",   "No message provided");
+@SuppressWarnings("unchecked")
+public void processAndSendAlert(Map<String, Object> payload) {
+    String alertName = getStr(payload, "alertname", "Unknown Alert");
+    String severity  = getStr(payload, "severity",  "critical");
+    String state     = getStr(payload, "state",     "firing");
+    String message   = getStr(payload, "message",   "No message provided");
 
-        // Safely extract service name from nested labels map
-        String service = "Unknown Service";
-        Object labelsObj = payload.get("labels");
-        if (labelsObj instanceof Map) {
-            Map<String, Object> labels = (Map<String, Object>) labelsObj;
-            service = getStr(labels, "service_name", "Unknown Service");
-        }
+    String service = "Unknown Service";
+    Object labelsObj = payload.get("labels");
+    if (labelsObj instanceof Map) {
+        Map<String, Object> labels = (Map<String, Object>) labelsObj;
+        service = getStr(labels, "service_name", "Unknown Service");
+    }
 
-        String subject = "[ALERT] " + service + " - " + alertName;
-        String body = "Dear Manager,\n\n"
+    // Different subject and body for resolved vs firing
+    String subject;
+    String body;
+
+    if ("resolved".equalsIgnoreCase(state)) {
+        subject = "✅ [RESOLVED] " + service + " is back to normal";
+        body = "Dear Manager,\n\n"
+            + "Good news! The service has recovered.\n\n"
+            + "Service   : " + service   + "\n"
+            + "Alert     : " + alertName + "\n"
+            + "Status    : RESOLVED ✅\n"
+            + "Message   : " + message   + "\n"
+            + "Time      : " + java.time.LocalDateTime.now() + "\n\n"
+            + "The service is back UP and running normally.\n\n"
+            + "Check SigNoz: http://localhost:3301\n\n"
+            + "Regards,\nSigNoz Monitoring";
+    } else {
+        subject = "🚨 [ALERT] " + service + " - " + alertName;
+        body = "Dear Manager,\n\n"
             + "An alert has been triggered!\n\n"
             + "Service   : " + service   + "\n"
             + "Alert     : " + alertName + "\n"
@@ -45,10 +61,10 @@ public class AlertEmailService {
             + "Time      : " + java.time.LocalDateTime.now() + "\n\n"
             + "Check SigNoz: http://localhost:3301\n\n"
             + "Regards,\nSigNoz Monitoring";
-
-        sendEmail(subject, body);
     }
 
+    sendEmail(subject, body);
+}
     public void sendTestAlert() {
         sendEmail(
             "[SigNoz Test] Alert system working",
