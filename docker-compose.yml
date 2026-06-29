@@ -24,16 +24,20 @@ services:
     container_name: signoz
     restart: unless-stopped
     ports:
-      - "3301:3301"
+      - "3301:8080"
       - "4317:4317"
       - "4318:4318"
     networks:
       - signoz-network
     volumes:
       - signoz_data:/var/lib/signoz
+    environment:
+      - SIGNOZ_LOCAL_DB_PATH=/var/lib/signoz/signoz.db
+      - SIGNOZ_TOKENIZER_JWT_SECRET=my-signoz-secret-key-2024
 
   signoz-demo:
     image: truptithorat/signoz-demo:latest
+    pull_policy: never
     container_name: signoz-demo
     restart: unless-stopped
     ports:
@@ -50,9 +54,17 @@ services:
       - SPRING_DATASOURCE_USERNAME=root
       - SPRING_DATASOURCE_PASSWORD=root
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://signoz:4318
+      - SPRING_MAIL_HOST=smtp.gmail.com
+      - SPRING_MAIL_PORT=587
+      - SPRING_MAIL_USERNAME=trupti.thorat38@gmail.com
+      - SPRING_MAIL_PASSWORD=hjux ppxt lyjd ricu
+      - SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH=true
+      - SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE=true
+      - ALERT_EMAIL_TO=trupti.thorat38@gmail.com
 
   order-service:
     image: truptithorat/order-service:latest
+    pull_policy: never
     container_name: order-service
     restart: unless-stopped
     ports:
@@ -64,9 +76,11 @@ services:
       - signoz-network
     environment:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://signoz:4318
+      - OTEL_SERVICE_NAME=order-service
 
   payment-service:
     image: truptithorat/payment-service:latest
+    pull_policy: never
     container_name: payment-service
     restart: unless-stopped
     ports:
@@ -78,6 +92,7 @@ services:
       - signoz-network
     environment:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://signoz:4318
+      - OTEL_SERVICE_NAME=payment-service
 
 networks:
   signoz-network:
