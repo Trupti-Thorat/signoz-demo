@@ -19,19 +19,32 @@ public class AlertEmailService {
     @Value("${spring.mail.username}")
     private String fromEmail;
 
+    @SuppressWarnings("unchecked")
     public void processAndSendAlert(Map<String, Object> payload) {
-        String alertName = String.valueOf(payload.getOrDefault("alertname", "Unknown Alert"));
-        String severity  = String.valueOf(payload.getOrDefault("severity",  "unknown"));
-        String message   = String.valueOf(payload.getOrDefault("message",   "No message provided"));
-        String state     = String.valueOf(payload.getOrDefault("state",     "firing"));
+        String alertName = getStr(payload, "alertname", "Unknown Alert");
+        String severity  = getStr(payload, "severity",  "critical");
+        String state     = getStr(payload, "state",     "firing");
+        String message   = getStr(payload, "message",   "No message provided");
 
-        String subject = "[SigNoz Alert] " + alertName + " - " + severity.toUpperCase();
-        String body    = "Alert Details:\n\n"
-                       + "Alert Name : " + alertName + "\n"
-                       + "Severity   : " + severity  + "\n"
-                       + "State      : " + state     + "\n"
-                       + "Message    : " + message   + "\n"
-                       + "Payload    : " + payload.toString();
+        // Safely extract service name from nested labels map
+        String service = "Unknown Service";
+        Object labelsObj = payload.get("labels");
+        if (labelsObj instanceof Map) {
+            Map<String, Object> labels = (Map<String, Object>) labelsObj;
+            service = getStr(labels, "service_name", "Unknown Service");
+        }
+
+        String subject = "[ALERT] " + service + " - " + alertName;
+        String body = "Dear Manager,\n\n"
+            + "An alert has been triggered!\n\n"
+            + "Service   : " + service   + "\n"
+            + "Alert     : " + alertName + "\n"
+            + "Severity  : " + severity  + "\n"
+            + "State     : " + state     + "\n"
+            + "Message   : " + message   + "\n"
+            + "Time      : " + java.time.LocalDateTime.now() + "\n\n"
+            + "Check SigNoz: http://localhost:3301\n\n"
+            + "Regards,\nSigNoz Monitoring";
 
         sendEmail(subject, body);
     }
@@ -39,8 +52,15 @@ public class AlertEmailService {
     public void sendTestAlert() {
         sendEmail(
             "[SigNoz Test] Alert system working",
-            "This is a test alert from SignozDemo.\nYour webhook and email setup is working correctly."
+            "This is a test alert from SignozDemo.\n"
+            + "Your webhook and email setup is working correctly."
         );
+    }
+
+    // ── helper: safely get a String from any Map<String, Object> ──
+    private String getStr(Map<String, Object> map, String key, String defaultVal) {
+        Object val = map.get(key);
+        return val != null ? String.valueOf(val) : defaultVal;
     }
 
     private void sendEmail(String subject, String body) {
