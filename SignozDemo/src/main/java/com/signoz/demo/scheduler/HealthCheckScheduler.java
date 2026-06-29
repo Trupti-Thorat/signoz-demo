@@ -20,32 +20,39 @@ public class HealthCheckScheduler {
     private AlertEmailService alertEmailService;
 
     private final RestTemplate restTemplate = new RestTemplate();
-
-    // Tracks previous state of each service: true = UP, false = DOWN
-    // ConcurrentHashMap is thread-safe for scheduled tasks
     private final Map<String, Boolean> serviceStatus = new ConcurrentHashMap<>();
+    private final Map<String, Boolean> slowStatus    = new ConcurrentHashMap<>();
 
+    // Response time threshold in milliseconds
+    private static final long SLOW_THRESHOLD_MS = 1000;
+
+    // ── Health checks every 60 seconds ──────────────────────────
     @Scheduled(fixedDelay = 60000)
     public void checkServices() {
-        log.info("Running health checks for all services...");
+        log.info("Running health checks...");
         checkService("order-service",   "http://order-service:8082/actuator/health");
         checkService("payment-service", "http://payment-service:8083/actuator/health");
     }
 
-    private void checkService(String name, String url) {
-        // Get previous state — assume UP on first run (null = never checked)
-        Boolean previouslyUp = serviceStatus.get(name);
+    // ── Response time checks every 30 seconds ────────────────────
+    @Scheduled(fixedDelay = 30000)
+    public void checkResponseTimes() {
+        log.info("Running response time checks...");
+        checkResponseTime("order-service",   "http://order-service:8082/orders/hello");
+        checkResponseTime("payment-service", "http://payment-service:8083/payment/hello");
+    }
 
+    // ── Health check logic ───────────────────────────────────────
+    private void checkService(String name, String url) {
+        Boolean previouslyUp = serviceStatus.get(name);
         try {
             String response = restTemplate.getForObject(url, String.class);
             boolean isUp = response != null && response.contains("UP");
 
             if (isUp) {
                 log.info("{} is UP", name);
-
-                // Was it DOWN before? → Send RECOVERY email
                 if (Boolean.FALSE.equals(previouslyUp)) {
-                    log.info("{} has RECOVERED — sending recovery email", name);
+                    log.info("{} RECOVERED — sending recovery email", name);
                     alertEmailService.processAndSendAlert(Map.of(
                         "alertname", "ServiceRecovered",
                         "state",     "resolved",
@@ -54,32 +61,22 @@ public class HealthCheckScheduler {
                         "message",   name + " is back UP and healthy"
                     ));
                 }
-
                 serviceStatus.put(name, true);
-
             } else {
-                log.warn("{} returned unexpected response: {}", name, response);
-
-                // Only send alert if it was UP before (avoid repeat emails)
                 if (!Boolean.FALSE.equals(previouslyUp)) {
                     alertEmailService.processAndSendAlert(Map.of(
                         "alertname", "ServiceDegraded",
                         "state",     "firing",
                         "severity",  "warning",
                         "labels",    Map.of("service_name", name),
-                        "message",   name + " health check returned unexpected response"
+                        "message",   name + " returned unexpected health response"
                     ));
                 }
-
                 serviceStatus.put(name, false);
             }
-
         } catch (Exception e) {
-            log.error("{} is DOWN! Error: {}", name, e.getMessage());
-
-            // Only send DOWN alert if it was UP before (avoid repeat emails)
+            log.error("{} is DOWN: {}", name, e.getMessage());
             if (!Boolean.FALSE.equals(previouslyUp)) {
-                log.info("{} just went DOWN — sending alert email", name);
                 alertEmailService.processAndSendAlert(Map.of(
                     "alertname", "ServiceDown",
                     "state",     "firing",
@@ -88,8 +85,54 @@ public class HealthCheckScheduler {
                     "message",   name + " is DOWN: " + e.getMessage()
                 ));
             }
-
             serviceStatus.put(name, false);
+        }
+    }
+
+    // ── Response time check logic ────────────────────────────────
+    private void checkResponseTime(String name, String url) {
+        Boolean previouslySlow = slowStatus.get(name);
+        try {
+            long start    = System.currentTimeMillis();
+            restTemplate.getForObject(url, String.class);
+            long duration = System.currentTimeMillis() - start;
+
+            log.info("{} response time: {}ms", name, duration);
+
+            if (duration > SLOW_THRESHOLD_MS) {
+                log.warn("{} is SLOW: {}ms (threshold: {}ms)", name, duration, SLOW_THRESHOLD_MS);
+
+                // Only email on first detection, not every 30s
+                if (!Boolean.TRUE.equals(previouslySlow)) {
+                    alertEmailService.processAndSendAlert(Map.of(
+                        "alertname", "HighResponseTime",
+                        "state",     "firing",
+                        "severity",  "warning",
+                        "labels",    Map.of("service_name", name),
+                        "message",   name + " response time is " + duration
+                                     + "ms (threshold: " + SLOW_THRESHOLD_MS + "ms)"
+                    ));
+                }
+                slowStatus.put(name, true);
+
+            } else {
+                // Was it slow before? → Send recovery email
+                if (Boolean.TRUE.equals(previouslySlow)) {
+                    log.info("{} response time back to normal: {}ms", name, duration);
+                    alertEmailService.processAndSendAlert(Map.of(
+                        "alertname", "ResponseTimeNormal",
+                        "state",     "resolved",
+                        "severity",  "info",
+                        "labels",    Map.of("service_name", name),
+                        "message",   name + " response time is back to normal: "
+                                     + duration + "ms"
+                    ));
+                }
+                slowStatus.put(name, false);
+            }
+
+        } catch (Exception e) {
+            log.error("Could not check response time for {}: {}", name, e.getMessage());
         }
     }
 }
